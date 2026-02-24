@@ -7,23 +7,23 @@ UDP server installation for ZIVPN Tunnel (SSH/DNS/UDP) VPN app.
 
 #### Installation AMD
 ```
-wget -O zi.sh https://raw.githubusercontent.com/sweaterpink1999/udp-zivpn-sweaterpink/main/zi.sh; sudo chmod +x zi.sh; sudo ./zi.sh
+wget -O zi.sh https://raw.githubusercontent.com/Deriandri/zuvpn/main/zi.sh; sudo chmod +x zi.sh; sudo ./zi.sh
 ```
 
 #### Installation ARM
 ```
-bash <(curl -fsSL https://raw.githubusercontent.com/sweaterpink1999/udp-zivpn-sweaterpink/main/zi2.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Deriandri/zuvpn/main/zi2.sh)
 ```
 
 
 ### Uninstall
 
 ```
-sudo wget -O ziun.sh https://raw.githubusercontent.com/sweaterpink1999/udp-zivpn-sweaterpink/main/uninstall.sh; sudo chmod +x ziun.sh; sudo ./ziun.sh
+sudo wget -O ziun.sh https://raw.githubusercontent.com/Deriandri/zuvpn/main/uninstall.sh; sudo chmod +x ziun.sh; sudo ./ziun.sh
 ```
 ### update menu
 ```
-curl -fsSL https://raw.githubusercontent.com/sweaterpink1999/udp-zivpn-sweaterpink/main/zivpn-menu.sh -o /usr/bin/zivpn-menu
+curl -fsSL https://raw.githubusercontent.com/Deriandri/zuvpn/main/zivpn-menu.sh -o /usr/bin/zivpn-menu
 chmod +x /usr/bin/zivpn-menu
 menu
 ```
