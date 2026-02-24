@@ -572,7 +572,7 @@ fi
 
 
 while true; do
-menu
+menu-zi
 case $opt in
 1) create_account ;;
 2) list_accounts; read -p "Press Enter..." ;;
