@@ -3,10 +3,10 @@
 
 set -e
 
-MENU_URL="https://raw.githubusercontent.com/sweaterpink1999/udp-zivpn-sweaterpink/main/zivpn-menu.sh"
+MENU_URL="https://raw.githubusercontent.com/Deriandri/zuvpn/main/zivpn-menu.sh"
 MENU_PATH="/usr/bin/zivpn-menu"
 
-CMD_URL="https://raw.githubusercontent.com/sweaterpink1999/udp-zivpn-sweaterpink/main/menu"
+CMD_URL="https://raw.githubusercontent.com/Deriandri/zuvpn/main/menu"
 CMD_PATH="/usr/bin/menu"
 
 echo "Installing ZIVPN Menu..."
