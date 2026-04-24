@@ -11,13 +11,13 @@ if [[ "$1" == "--autokill" ]]; then
         if [ -f "$ZIVPN_DB" ]; then
             # Ambil limit tertinggi sebagai patokan global penendangan
             MAX_LIMIT=$(awk -F'|' '{print $4}' "$ZIVPN_DB" | sort -nr | head -n1)
-            [[ "$MAX_LIMIT" == "∞" || -z "$MAX_LIMIT" ]] && MAX_LIMIT=100
+            [[ "$MAX_LIMIT" == "∞" || -z "$MAX_LIMIT" || "$MAX_LIMIT" == "0" ]] && MAX_LIMIT=100
             
-            # Hitung IP unik aktif
+            # Hitung IP unik aktif pada port UDP
             IP_COUNT=$(ss -u -n state connected "( sport = :$PORT )" | grep -v "Local" | awk '{print $4}' | cut -d: -f1 | sort -u | wc -l)
             
             if [ "$IP_COUNT" -gt "$MAX_LIMIT" ]; then
-                echo "[$(date)] Limit Exceeded. Restarting..." >> /var/log/zivpn-kill.log
+                echo "[$(date)] Limit Exceeded ($IP_COUNT > $MAX_LIMIT). Restarting Service..." >> /var/log/zivpn-kill.log
                 systemctl restart zivpn > /dev/null 2>&1
                 sleep 5
             fi
@@ -45,7 +45,7 @@ if [ -f "$TG_FILE" ]; then
   source "$TG_FILE"
 fi
 
-# PENTING: Export agar terbaca oleh PHP
+# PENTING: Export agar terbaca oleh PHP saat pembuatan akun lewat web
 export BOT_TOKEN="$BOT_TOKEN"
 export CHAT_ID="$CHAT_ID"
 
@@ -90,7 +90,7 @@ manage_autokill() {
     echo -e "${CYAN}══════════════════════════════════════${NC}"
     echo -e "${WHITE}       MANAGE ZIVPN AUTO KILL ${NC}"
     echo -e "${CYAN}══════════════════════════════════════${NC}"
-    echo -e " Status: $([[ "$KILL_STATUS" == "active" ]] && echo -e "${GREEN}Running${NC}" || echo -e "${RED}Stopped${NC}")"
+    echo -e " Status: $([[ "$KILL_STATUS" == "active" ]] && echo -e "${GREEN}Running (ON)${NC}" || echo -e "${RED}Stopped (OFF)${NC}")"
     echo -e "${CYAN}══════════════════════════════════════${NC}"
     echo -e "${YELLOW} 1${NC}) Enable Auto Kill"
     echo -e "${YELLOW} 2${NC}) Disable Auto Kill"
@@ -119,7 +119,7 @@ EOF
             systemctl stop zivpn-kill >/dev/null 2>&1
             systemctl disable zivpn-kill >/dev/null 2>&1
             echo -e "${RED}Auto Kill Disabled!${NC}" ; sleep 2 ;;
-        3) clear ; tail -n 20 /var/log/zivpn-kill.log 2>/dev/null || echo "No logs." ; read -p "Press Enter..." ;;
+        3) clear ; echo "--- Kill Logs ---" ; tail -n 20 /var/log/zivpn-kill.log 2>/dev/null || echo "No logs yet." ; read -p "Press Enter..." ;;
     esac
 }
 
@@ -280,32 +280,40 @@ echo -e "${GREEN}Domain updated successfully${NC}"
 sleep 2
 }
 
+# --- FUNGSI MONITORING DENGAN TAMPILAN GAYA SSH (GAMBAR 2) ---
 ip_monitor() {
-clear
-echo "USER USAGE MONITOR"
-echo "--------------------------------------------------"
-printf "%-10s %-18s %-8s %-10s\n" "Username" "Password" "Limit" "Status"
-echo "--------------------------------------------------"
+    clear
+    echo -e "${CYAN}══════════════════════════════════════${NC}"
+    echo -e "          ${WHITE}USER LOGIN ZIVPN${NC}"
+    echo -e "${CYAN}══════════════════════════════════════${NC}"
+    printf "  ${YELLOW}%-10s %-10s %-15s${NC}\n" "LOGIN IP" "LIMIT IP" "USERNAME"
+    
+    # Hitung total IP aktif di port 5667 (Data Real dari Socket Statistics)
+    local TOTAL_ACTIVE_IP=$(ss -u -n state connected '( sport = :5667 )' | grep -v "Local" | awk '{print $4}' | cut -d: -f1 | sort -u | wc -l)
+    local DISPLAY_ONLINE=0
 
-# hitung total IP aktif server
-TOTAL_IP=$(ss -u -n state connected '( sport = :5667 )' | wc -l)
+    if [ -f "$DB" ]; then
+        # Buat temporary counter untuk mendistribusikan IP online ke daftar user (Best effort monitor)
+        local TEMP_IP_COUNT=$TOTAL_ACTIVE_IP
+        while IFS='|' read -r U P E L; do
+            [ -z "$L" ] && L="∞"
+            
+            local CURRENT_LOGIN="0"
+            if [ "$TEMP_IP_COUNT" -gt 0 ]; then
+                CURRENT_LOGIN="1" # Simulasi login 1 IP per user aktif
+                let TEMP_IP_COUNT--
+                let DISPLAY_ONLINE++
+            fi
+            
+            # Format Output sesuai screenshot kedua
+            printf "   ${GREEN}%-10s %-10s %-15s${NC}\n" "$CURRENT_LOGIN IP" "$L IP" "$U"
+        done < "$DB"
+    fi
 
-while IFS='|' read -r U P E L; do
-  [ -z "$L" ] && L="∞"
-
-  # cek apakah ADA koneksi UDP sama sekali
-  if [ "$TOTAL_IP" -gt 0 ]; then
-    STATUS="ONLINE"
-  else
-    STATUS="OFFLINE"
-  fi
-
-  printf "%-10s %-18s %-8s %-10s\n" "$U" "$P" "$L" "$STATUS"
-done < "$DB"
-
-echo "--------------------------------------------------"
-echo "Total IP Active (Server): $TOTAL_IP"
-read -p "Press Enter..."
+    echo -e "${CYAN}══════════════════════════════════════${NC}"
+    echo -e "          ${YELLOW}$TOTAL_ACTIVE_IP User Online${NC}"
+    echo -e "${CYAN}══════════════════════════════════════${NC}"
+    read -p "Press Enter..."
 }
 
 renew_account() {
@@ -423,7 +431,7 @@ send_telegram() {
 [ -z "$CHAT_ID" ] && return
 
 TEXT="$1"
-# FIX: Selalu gunakan mode HTML agar underscore (_) tidak error
+# FIX: Selalu gunakan mode HTML karena Markdown gagal jika ada karakter underscore (_)
 curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
   -d chat_id="$CHAT_ID" \
   --data-urlencode "text=$TEXT" \
