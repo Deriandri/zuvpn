@@ -1,7 +1,7 @@
 #!/bin/bash
 set +e
 # ZIVPN Menu - COLOR UI (MULTI USER)
-# FIX: Telegram Notification using HTML Mode for Underscore compatibility
+# FIX: Telegram Sync menggunakan mode HTML untuk kompatibilitas underscore (_)
 
 CONFIG="/etc/zivpn/config.json"
 DB="/etc/zivpn/users.db"
@@ -136,7 +136,6 @@ echo "$USER|$PASS|$EXP|$LIMIT" >> "$DB"
 systemctl restart zivpn
 
 # ===== TELEGRAM NOTIFICATION (FIXED: HTML MODE) =====
-# Menggunakan tag HTML agar tidak error karena underscore (_)
 send_telegram "<b>📢 PEMBELIAN BERHASIL</b>
 ────────────────────
 🌐 Domain        : $DOMAIN
@@ -353,7 +352,7 @@ send_telegram() {
 [ -z "$CHAT_ID" ] && return
 
 TEXT="$1"
-# FIX: Selalu gunakan mode HTML karena Markdown gagal jika ada karakter underscore (_)
+# FIX: Menggunakan mode HTML agar karakter underscore (_) tidak dianggap error oleh Telegram
 curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
   -d chat_id="$CHAT_ID" \
   --data-urlencode "text=$TEXT" \
