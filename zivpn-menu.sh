@@ -355,7 +355,7 @@ TEXT="$1"
 curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
   -d chat_id="$CHAT_ID" \
   --data-urlencode "text=$TEXT" \
-  --data-urlencode "parse_mode=Markdown" >/dev/null 2>&1 &
+  --data-urlencode "parse_mode=Markdown" >/dev/null 2>&1 
 }
 
 backup_restore_drive() {
