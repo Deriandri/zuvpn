@@ -135,8 +135,8 @@ echo "$USER|$PASS|$EXP|$LIMIT" >> "$DB"
 
 systemctl restart zivpn
 
-# ===== TELEGRAM NOTIFICATION =====
-send_telegram "📢 *_PEMBELIAN BERHASIL_*
+# ===== TELEGRAM NOTIFICATION (FIXED TO HTML) =====
+send_telegram "📢 <b><i>PEMBELIAN BERHASIL</i></b>
 ────────────────────
 🌐 Domain        : $DOMAIN
 👤 Username      : $USER
@@ -172,8 +172,8 @@ jq --arg pass "$PASS" '.auth.config += [$pass]' "$CONFIG" > /tmp/z.json && mv /t
 echo "$USER|$PASS|$EXP|$LIMIT" >> "$DB"
 systemctl restart zivpn
 
-# ===== TELEGRAM NOTIFICATION =====
-send_telegram "⏱ *ZIVPN TRIAL ACCOUNT*
+# ===== TELEGRAM NOTIFICATION (FIXED TO HTML) =====
+send_telegram "⏱ <b>ZIVPN TRIAL ACCOUNT</b>
 ────────────────────
 🌐 Domain   : $DOMAIN
 👤 Username : $USER
@@ -352,10 +352,11 @@ send_telegram() {
 [ -z "$CHAT_ID" ] && return
 
 TEXT="$1"
+# FIX: Menggunakan mode HTML agar karakter underscore (_) tidak dianggap error oleh Telegram
 curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
   -d chat_id="$CHAT_ID" \
   --data-urlencode "text=$TEXT" \
-  --data-urlencode "parse_mode=Markdown" >/dev/null 2>&1 
+  --data-urlencode "parse_mode=html" >/dev/null 2>&1 
 }
 
 backup_restore_drive() {
