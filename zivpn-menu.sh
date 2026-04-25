@@ -3,41 +3,40 @@ set +e
 # ZIVPN Menu - COLOR UI (MULTI USER)
 # READY FOR SELLING | NO AUTO BLOCK
 
-# --- LOGIKA BACKGROUND AUTO KILL (ENGINE V4 - REAL TIME LOGS) ---
+# --- LOGIKA BACKGROUND AUTO KILL (DETEKSI & TENDANG REAL) ---
 if [[ "$1" == "--autokill" ]]; then
     PORT="5667"
     ZIVPN_DB="/etc/zivpn/users.db"
     LOG_FILE="/var/log/zivpn-kill.log"
     while true; do
         if [ -f "$ZIVPN_DB" ]; then
-            # Ambil semua IP yang sedang aktif mengirim paket UDP ke port 5667
+            # Ambil trafik IP yang sedang aktif kirim paket
             ACTIVE_IPS=$(ss -u -an | grep ":$PORT" | awk '{print $6}' | cut -d: -f1 | grep -vE "0.0.0.0|[*]" | sort -u)
-            # Ambil log login ZIVPN 1 menit terakhir
+            # Ambil log login terbaru
             LOG_NOW=$(journalctl -u zivpn --since "1 minute ago" --no-pager)
 
             while IFS='|' read -r U P E L; do
                 [[ "$L" == "∞" || "$L" == "0" || -z "$L" ]] && continue
                 
-                # Hitung berapa IP berbeda yang login pake user ini dan IP-nya masih aktif di jaringan
+                # Deteksi User melanggar limit
                 TOTAL_FOUND=0
-                # Cari semua IP yang pernah login atas nama user ini di log terbaru
-                IPS_IN_LOG=$(echo "$LOG_NOW" | grep -w "$U" | grep "authenticated" | awk '{print $NF}' | cut -d: -f1 | sort -u)
+                IPS_USER=$(echo "$LOG_NOW" | grep -w "$U" | grep "authenticated" | awk '{print $NF}' | cut -d: -f1 | sort -u)
                 
-                for ip in $IPS_IN_LOG; do
+                for ip in $IPS_USER; do
                     if echo "$ACTIVE_IPS" | grep -q "$ip"; then
                         let TOTAL_FOUND++
                     fi
                 done
 
                 if [ "$TOTAL_FOUND" -gt "$L" ]; then
-                    echo "[$(date)] LIMIT REACHED: User $U menggunakan $TOTAL_FOUND IP (Limit $L). KICKING..." >> $LOG_FILE
+                    echo "[$(date)] DETEKSI: User $U ($TOTAL_FOUND/$L IP). TENDANG!" >> $LOG_FILE
                     systemctl restart zivpn > /dev/null 2>&1
                     sleep 3
                     break
                 fi
             done < "$ZIVPN_DB"
         fi
-        sleep 15 # Cek setiap 15 detik (Lebih agresif)
+        sleep 15
     done
     exit 0
 fi
@@ -54,14 +53,30 @@ DOMAIN=$(cat "$DOMAIN_FILE")
 
 # ===== TELEGRAM FILE =====
 TG_FILE="/etc/zivpn/telegram.conf"
-if [ -f "$TG_FILE" ]; then source "$TG_FILE"; fi
 
-# Export agar sinkron ke Website
+# load telegram config jika ada
+if [ -f "$TG_FILE" ]; then
+  source "$TG_FILE"
+fi
+
+# PENTING: Export variabel agar dibaca PHP Website
 export BOT_TOKEN="$BOT_TOKEN"
 export CHAT_ID="$CHAT_ID"
 
-# ===== ENSURE DEPENDENCIES =====
-if ! command -v jq >/dev/null 2>&1; then apt update -y; apt install -y jq; fi
+# ===== ENSURE JQ =====
+if ! command -v jq >/dev/null 2>&1; then
+  apt update -y >/dev/null 2>&1
+  apt install -y jq >/dev/null 2>&1
+fi
+
+# ===== ENSURE ZIP & UNZIP =====
+if ! command -v zip >/dev/null 2>&1; then
+  apt install -y zip >/dev/null 2>&1
+fi
+
+if ! command -v unzip >/dev/null 2>&1; then
+  apt install -y unzip >/dev/null 2>&1
+fi
 
 # ===== COLORS =====
 RED='\033[0;31m'
@@ -71,6 +86,17 @@ CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m'
 
+# ===== SYSTEM INFO =====
+OS=$(lsb_release -ds 2>/dev/null | tr -d '"')
+IP=$(curl -s ifconfig.me)
+UPTIME=$(uptime -p)
+CPU=$(nproc)
+RAM_USED=$(free -m | awk '/Mem:/ {print $3}')
+RAM_TOTAL=$(free -m | awk '/Mem:/ {print $2}')
+DISK_USED=$(df -h / | awk 'NR==2 {print $3}')
+DISK_TOTAL=$(df -h / | awk 'NR==2 {print $2}')
+ZIVPN_STATUS=$(systemctl is-active zivpn 2>/dev/null)
+
 # --- FUNGSI MANAGE AUTO KILL ---
 manage_autokill() {
     KILL_STATUS=$(systemctl is-active zivpn-kill 2>/dev/null)
@@ -78,18 +104,18 @@ manage_autokill() {
     echo -e "${CYAN}══════════════════════════════════════${NC}"
     echo -e "${WHITE}       MANAGE ZIVPN AUTO KILL ${NC}"
     echo -e "${CYAN}══════════════════════════════════════${NC}"
-    echo -e " Status: $([[ "$KILL_STATUS" == "active" ]] && echo -e "${GREEN}Running (Satpam Aktif)${NC}" || echo -e "${RED}OFF${NC}")"
+    echo -e " Status Satpam: $([[ "$KILL_STATUS" == "active" ]] && echo -e "${GREEN}AKTIF (Jalan)${NC}" || echo -e "${RED}MATI (Pajangan)${NC}")"
     echo -e "${CYAN}══════════════════════════════════════${NC}"
-    echo -e "${YELLOW} 1${NC}) Enable Auto Kill"
-    echo -e "${YELLOW} 2${NC}) Disable Auto Kill"
-    echo -e "${YELLOW} 3${NC}) View Penendangan Logs"
+    echo -e "${YELLOW} 1${NC}) Aktifkan Auto Kill"
+    echo -e "${YELLOW} 2${NC}) Matikan Auto Kill"
+    echo -e "${YELLOW} 3${NC}) Lihat Log Penendangan"
     echo -e "${RED} 0${NC}) Back"
-    read -rp " Pilih : " akopt
+    read -rp " Select : " akopt
     case $akopt in
         1)
             cat > /etc/systemd/system/zivpn-kill.service <<EOF
 [Unit]
-Description=ZIVPN Real Auto Kill
+Description=ZIVPN Real Auto Kill Engine
 After=network.target
 [Service]
 ExecStart=/usr/bin/zivpn-menu --autokill
@@ -98,58 +124,11 @@ Restart=always
 WantedBy=multi-user.target
 EOF
             systemctl daemon-reload && systemctl enable zivpn-kill && systemctl start zivpn-kill
-            echo -e "${GREEN}Auto Kill Berhasil Dijalankan!${NC}" ; sleep 1 ;;
-        2) systemctl stop zivpn-kill ; systemctl disable zivpn-kill ; echo -e "${RED}Auto Kill Dimatikan!${NC}" ; sleep 1 ;;
-        3) clear ; echo "--- DAFTAR USER YANG PERNAH DITENDANG ---" ; tail -n 25 /var/log/zivpn-kill.log 2>/dev/null || echo "Belum ada log." ; read -p "Enter..." ;;
+            echo -e "${GREEN}Auto Kill Aktif!${NC}" ; sleep 1 ;;
+        2) systemctl stop zivpn-kill ; systemctl disable zivpn-kill ; echo -e "${RED}Auto Kill Mati!${NC}" ; sleep 1 ;;
+        3) clear ; echo "--- HISTORY PENENDANGAN ---" ; tail -n 25 /var/log/zivpn-kill.log 2>/dev/null || echo "Belum ada log." ; read -p "Press Enter..." ;;
     esac
 }
-
-# --- REAL MONITOR (GAYA SSH - GAMBAR 2) ---
-ip_monitor() {
-    clear
-    echo -e "${YELLOW}──────────────────────────────────────${NC}"
-    echo -e "          ${WHITE}USER LOGIN ZIVPN (REAL)${NC}"
-    echo -e "${YELLOW}──────────────────────────────────────${NC}"
-    printf "  ${CYAN}%-10s %-10s %-15s${NC}\n" "LOGIN IP" "LIMIT IP" "USERNAME"
-    
-    # 1. Deteksi IP yang sedang aktif mengirim trafik UDP
-    local LIVE_TRAFFIC=$(ss -u -an | grep ":5667" | awk '{print $6}' | cut -d: -f1 | sort -u)
-    # 2. Baca Log Handshake 10 jam terakhir
-    local RECENT_LOGS=$(journalctl -u zivpn --since "10 hours ago" --no-pager | grep "authenticated")
-    
-    local count_user_online=0
-    if [ -f "$DB" ]; then
-        while IFS='|' read -r U P E L; do
-            [ -z "$L" ] && L="∞"
-            
-            # Cari IP login terakhir user ini
-            local LAST_IP=$(echo "$RECENT_LOGS" | grep -w "$U" | tail -n 1 | awk '{print $NF}' | cut -d: -f1)
-            
-            local STATUS_LOGIN="0 IP"
-            if [[ -n "$LAST_IP" ]]; then
-                # Jika IP tersebut terdeteksi di LIVE TRAFFIC, berarti REAL ONLINE
-                if echo "$LIVE_TRAFFIC" | grep -q "$LAST_IP"; then
-                    STATUS_LOGIN="1 IP"
-                    let count_user_online++
-                    COLOR_DATA="\033[1;32m" # Hijau jika Online
-                else
-                    COLOR_DATA="\033[0;37m" # Putih jika Offline
-                fi
-            else
-                COLOR_DATA="\033[0;37m"
-            fi
-            
-            printf "   ${COLOR_DATA}%-10s %-10s %-15s${NC}\n" "$STATUS_LOGIN" "$L IP" "$U"
-        done < "$DB"
-    fi
-
-    echo -e "${YELLOW}──────────────────────────────────────${NC}"
-    echo -e "          ${WHITE}$count_user_online User Online Sekarang${NC}"
-    echo -e "${YELLOW}──────────────────────────────────────${NC}"
-    read -p "Press Enter..."
-}
-
-# --- SEMUA FUNGSI ASLI BOS (Create, List, Renew, dll) ---
 
 menu() {
   USER_COUNT=$(grep -c '|' "$DB" 2>/dev/null)
@@ -158,7 +137,7 @@ menu() {
 
   clear
   echo -e "${CYAN}══════════════════════════════════════${NC}"
-  echo -e "${WHITE}        Z I V P N   SWEATER PINK ${NC}"
+  echo -e "${WHITE}        Z I V P N   COPYRIGHT ${NC}"
   echo -e "${CYAN}══════════════════════════════════════${NC}"
   echo -e "${GREEN} OS      ${NC}: $OS"
   echo -e "${GREEN} Domain  ${NC}: ${YELLOW}$DOMAIN${NC}"
@@ -189,95 +168,544 @@ menu() {
   read -rp " Select Menu : " opt
 }
 
-# --- FUNGSI-FUNGSI PENDUKUNG (TETAP SAMA SEPERTI ASLINYA) ---
+
 list_accounts() {
-    clear
-    printf "%-4s %-15s %-18s %-16s %-8s\n" "No" "Username" "Password" "Expired" "Limit"
-    echo "--------------------------------------------------------------------------"
-    nl -w2 -s'. ' "$DB" | while read -r n l; do
-      IFS='|' read -r U P E L <<< "$l"; [ -z "$L" ] && L="∞"
-      printf "%-4s %-15s %-18s %-16s %-8s\n" "$n" "$U" "$P" "$E" "$L"
-    done
-    read -p "Press Enter..."
+clear
+echo "--------------------------------------------------------------------------"
+printf "%-4s %-15s %-18s %-16s %-8s\n" "No" "Username" "Password" "Expired" "Limit"
+echo "--------------------------------------------------------------------------"
+nl -w2 -s'. ' "$DB" | while read -r n l; do
+  IFS='|' read -r U P E L <<< "$l"
+  [ -z "$L" ] && L="∞"
+  printf "%-4s %-15s %-18s %-16s %-8s\n" "$n" "$U" "$P" "$E" "$L"
+done
+echo "--------------------------------------------------------------------------"
+read -p "Press Enter..."
 }
 
 create_account() {
-    while true; do
-      read -rp " Username : " USER
-      [ -z "$USER" ] && echo "Username tidak boleh kosong!" && continue
-      if grep -q "^$USER|" "$DB"; then echo "❌ Username sudah ada!" && continue ; fi
-      break
-    done
-    read -rp " Duration (days) : " DAYS
-    read -rp " IP Limit (1/2/3, 0=unlimit) : " LIMIT
-    [ "$LIMIT" = "0" ] && LIMIT="∞"
-    PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
-    EXP=$(date -d "$DAYS days +1 day" +"%Y-%m-%d 00:00")
-    jq --arg pass "$PASS" '.auth.config += [$pass]' "$CONFIG" > /tmp/z.json && mv /tmp/z.json "$CONFIG"
-    echo "$USER|$PASS|$EXP|$LIMIT" >> "$DB"
-    systemctl restart zivpn
-    send_telegram "<b>📢 PEMBELIAN BERHASIL</b>\n👤 User: $USER\n🔐 Pass: $PASS\n⏳ Exp: $EXP"
-    echo -e "${GREEN}CREATED!${NC}" ; read -p "Press Enter..."
+
+# ===== CEK USERNAME UNIK =====
+while true; do
+  read -rp " Username : " USER
+
+  # validasi kosong
+  [ -z "$USER" ] && echo "Username tidak boleh kosong!" && continue
+
+  # cek apakah username sudah ada di DB
+  if grep -q "^$USER|" "$DB"; then
+    echo "❌ Username '$USER' sudah ada, gunakan username lain!"
+    continue
+  fi
+
+  break
+done
+
+read -rp " Duration (days) : " DAYS
+read -rp " IP Limit (1/2/3, 0=unlimit) : " LIMIT
+[ "$LIMIT" = "0" ] && LIMIT="∞"
+
+PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
+EXP=$(date -d "$DAYS days +1 day" +"%Y-%m-%d 00:00")
+
+# simpan ke config & DB
+jq --arg pass "$PASS" '.auth.config += [$pass]' "$CONFIG" > /tmp/z.json && mv /tmp/z.json "$CONFIG"
+echo "$USER|$PASS|$EXP|$LIMIT" >> "$DB"
+
+systemctl restart zivpn
+
+# ===== TELEGRAM NOTIFICATION (FIXED HTML) =====
+send_telegram "<b>📢 PEMBELIAN BERHASIL</b>
+────────────────────
+🌐 Domain        : $DOMAIN
+👤 Username      : $USER
+🔐 Password      : $PASS
+⏳ Expired       : $EXP
+📆 Aktif Selama  : $DAYS Hari
+📱 IP Limit      : $LIMIT
+────────────────────
+✅ Type          : HARIAN"
+
+clear
+echo -e "${GREEN}ACCOUNT CREATED${NC}"
+echo " Domain        : $DOMAIN"
+echo " Username      : $USER"
+echo " Password      : $PASS"
+echo " Expired       : $EXP"
+echo " Aktif Selama  : $DAYS Hari"
+echo " IP Limit      : $LIMIT"
+read -p "Press Enter..."
+}
+
+
+create_trial() {
+read -rp " Trial duration (minutes): " MIN
+[[ -z "$MIN" || "$MIN" -le 0 ]] && return
+
+USER="trial$(tr -dc 0-9 </dev/urandom | head -c 4)"
+PASS=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
+EXP=$(date -d "+$MIN minutes" +"%Y-%m-%d %H:%M")
+LIMIT=1
+
+jq --arg pass "$PASS" '.auth.config += [$pass]' "$CONFIG" > /tmp/z.json && mv /tmp/z.json "$CONFIG"
+echo "$USER|$PASS|$EXP|$LIMIT" >> "$DB"
+systemctl restart zivpn
+
+# ===== TELEGRAM NOTIFICATION (FIXED HTML) =====
+send_telegram "<b>⏱ ZIVPN TRIAL ACCOUNT</b>
+────────────────────
+🌐 Domain   : $DOMAIN
+👤 Username : $USER
+🔐 Password : $PASS
+⏳ Expired  : $EXP
+📱 IP Limit : 1
+────────────────────
+⚡ Type     : TRIAL (${MIN} Minutes)"
+
+clear
+echo -e "${GREEN}TRIAL CREATED${NC}"
+echo " Domain   : $DOMAIN"
+echo " Username : $USER"
+echo " Password : $PASS"
+echo " Expired  : $EXP"
+echo " Limit IP : 1"
+read -p "Press Enter..."
+}
+
+change_domain() {
+read -rp " New Domain : " NEWDOMAIN
+[ -z "$NEWDOMAIN" ] && return
+echo "$NEWDOMAIN" > "$DOMAIN_FILE"
+
+openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 \
+-subj "/C=ID/ST=VPN/L=ZIVPN/O=ZIVPN/OU=ZIVPN/CN=$NEWDOMAIN" \
+-keyout /etc/zivpn/zivpn.key \
+-out /etc/zivpn/zivpn.crt 2>/dev/null
+
+systemctl restart zivpn
+DOMAIN="$NEWDOMAIN"
+echo -e "${GREEN}Domain updated successfully${NC}"
+sleep 2
+}
+
+# --- REAL IP MONITOR (STYLE SSH) ---
+ip_monitor() {
+    clear
+    echo -e "${YELLOW}──────────────────────────────────────${NC}"
+    echo -e "          ${WHITE}USER LOGIN ZIVPN (REAL)${NC}"
+    echo -e "${YELLOW}──────────────────────────────────────${NC}"
+    printf "  ${CYAN}%-10s %-10s %-15s${NC}\n" "LOGIN IP" "LIMIT IP" "USERNAME"
+    
+    # 1. Ambil trafik IP yang AKTIF di jalur UDP 5667
+    local LIVE_STACK=$(ss -u -an | grep ":5667" | awk '{print $6}' | cut -d: -f1 | sort -u)
+    # 2. Ambil log login ZIVPN 12 jam terakhir
+    local LOG_AUTH=$(journalctl -u zivpn --since "12 hours ago" --no-pager | grep "authenticated")
+    
+    local total_online=0
+    if [ -f "$DB" ]; then
+        while IFS='|' read -r U P E L; do
+            [ -z "$L" ] && L="∞"
+            
+            # Cari IP login terakhir user ini
+            local LAST_IP=$(echo "$LOG_AUTH" | grep -w "$U" | tail -n 1 | awk '{print $NF}' | cut -d: -f1)
+            
+            local LOGIN_COUNT="0 IP"
+            if [[ -n "$LAST_IP" ]]; then
+                # Jika IP terakhir user tsb terdeteksi AKTIF di stack, dia ONLINE
+                if echo "$LIVE_STACK" | grep -q "$LAST_IP"; then
+                    LOGIN_COUNT="1 IP"
+                    let total_online++
+                    COLOR_DATA="\033[1;32m" # Hijau jika Online
+                else
+                    COLOR_DATA="\033[0;37m" # Putih jika Offline
+                fi
+            else
+                COLOR_DATA="\033[0;37m"
+            fi
+            
+            printf "   ${COLOR_DATA}%-10s %-10s %-15s${NC}\n" "$LOGIN_COUNT" "$L IP" "$U"
+        done < "$DB"
+    fi
+
+    echo -e "${YELLOW}──────────────────────────────────────${NC}"
+    echo -e "          ${WHITE}$total_online User Online Sekarang${NC}"
+    echo -e "${YELLOW}──────────────────────────────────────${NC}"
+    read -p "Press Enter..."
+}
+
+renew_account() {
+list_accounts
+echo
+read -rp " Renew account number : " NUM
+read -rp " Extend days : " DAYS
+
+LINE=$(sed -n "${NUM}p" "$DB")
+[ -z "$LINE" ] && echo "Invalid number" && sleep 2 && return
+
+IFS='|' read -r U P E L <<< "$LINE"
+
+# jika expired pakai jam, buang jam
+BASE_DATE=$(echo "$E" | cut -d' ' -f1)
+NEWEXP=$(date -d "$BASE_DATE +$DAYS days +1 day" +"%Y-%m-%d 00:00")
+
+sed -i "${NUM}c\\$U|$P|$NEWEXP|$L" "$DB"
+systemctl restart zivpn
+
+echo -e "${GREEN}Account renewed successfully${NC}"
+sleep 2
+}
+
+delete_all_expired() {
+NOW=$(date +"%Y-%m-%d %H:%M")
+TMP="/tmp/zivpn-clean.db"
+> "$TMP"
+
+while IFS='|' read -r U P E L; do
+  if [[ "$E" < "$NOW" ]]; then
+    jq --arg pass "$P" '.auth.config -= [$pass]' "$CONFIG" > /tmp/z.json && mv /tmp/z.json "$CONFIG"
+  else
+    echo "$U|$P|$E|$L" >> "$TMP"
+  fi
+done < "$DB"
+
+mv "$TMP" "$DB"
+systemctl restart zivpn
+
+echo -e "${GREEN}Expired accounts deleted${NC}"
+sleep 2
+}
+
+restart_zivpn() {
+systemctl restart zivpn
+echo -e "${GREEN}ZIVPN restarted successfully${NC}"
+sleep 2
+}
+
+delete_account() {
+list_accounts
+echo
+echo "DELETE ACCOUNT"
+echo "--------------------------------------------------"
+echo "• Input NUMBER (1,2,3)"
+echo "• Atau input PASSWORD langsung"
+echo "--------------------------------------------------"
+read -rp " Input : " INPUT
+
+# delete by number
+if [[ "$INPUT" =~ ^[0-9]+$ ]]; then
+  LINE=$(sed -n "${INPUT}p" "$DB")
+  [ -z "$LINE" ] && echo "Invalid number" && sleep 2 && return
+  PASS=$(echo "$LINE" | awk -F'|' '{print $2}')
+  sed -i "${INPUT}d" "$DB"
+
+# delete by password (AMAN)
+else
+  PASS="$INPUT"
+  LINE_NUM=$(awk -F'|' -v p="$PASS" '$2==p {print NR}' "$DB")
+
+  [ -z "$LINE_NUM" ] && echo "Password not found" && sleep 2 && return
+  sed -i "${LINE_NUM}d" "$DB"
+fi
+
+# hapus dari config zivpn
+jq --arg pass "$PASS" '.auth.config -= [$pass]' "$CONFIG" > /tmp/z.json && mv /tmp/z.json "$CONFIG"
+
+systemctl restart zivpn
+echo -e "${GREEN}Account deleted successfully${NC}"
+sleep 2
+}
+
+telegram_setting() {
+clear
+echo "===================================="
+echo "   TELEGRAM BOT NOTIFICATION SETUP"
+echo "===================================="
+read -rp "Input Bot Token : " BOT_TOKEN
+read -rp "Input Chat ID   : " CHAT_ID
+
+if [[ -z "$BOT_TOKEN" || -z "$CHAT_ID" ]]; then
+  echo "Bot Token & Chat ID tidak boleh kosong!"
+  sleep 2
+  return
+fi
+
+cat > "$TG_FILE" <<EOF
+BOT_TOKEN="$BOT_TOKEN"
+CHAT_ID="$CHAT_ID"
+EOF
+
+chmod 600 "$TG_FILE"
+
+echo
+echo "Telegram Bot berhasil disimpan!"
+echo "Bot Token : $BOT_TOKEN"
+echo "Chat ID   : $CHAT_ID"
+sleep 2
 }
 
 send_telegram() {
-    [ -z "$BOT_TOKEN" ] && return
-    [ -z "$CHAT_ID" ] && return
-    TEXT="$1"
-    curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
-      -d chat_id="$CHAT_ID" \
-      --data-urlencode "text=$TEXT" \
-      --data-urlencode "parse_mode=html" >/dev/null 2>&1
+[ -f "$TG_FILE" ] && source "$TG_FILE"
+[ -z "$BOT_TOKEN" ] && return
+[ -z "$CHAT_ID" ] && return
+
+TEXT="$1"
+# FIX: Selalu gunakan mode HTML karena Markdown gagal jika ada karakter underscore (_)
+curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+  -d chat_id="$CHAT_ID" \
+  --data-urlencode "text=$TEXT" \
+  --data-urlencode "parse_mode=html" >/dev/null 2>&1 
 }
 
-# --- LOOPING MENU UTAMA ---
+backup_restore_drive() {
+  clear
+  echo "======================================"
+  echo " BACKUP & RESTORE ZIVPN"
+  echo "======================================"
+  echo "1) Backup sekarang"
+  echo "2) Restore"
+  echo "3) Aktifkan Auto Backup (03:00)"
+  echo "4) Nonaktifkan Auto Backup"
+  echo "5) Set Jam Auto Backup"
+  echo "0) Back"
+  echo "======================================"
+  read -rp "Pilih: " br
+
+  case $br in
+    1) backup_zivpn_drive ;;
+    2) restore_zivpn_drive ;;
+    3) enable_autobackup ;;
+    4) disable_autobackup ;;
+    5) set_autobackup_time ;;
+    0) return ;;
+    *) backup_restore_drive ;;
+  esac
+}
+
+enable_autobackup() {
+  crontab -l 2>/dev/null | grep -v zivpn-menu > /tmp/cron.tmp
+  echo "0 3 * * * /usr/bin/zivpn-menu --autobackup" >> /tmp/cron.tmp
+  crontab /tmp/cron.tmp
+  rm -f /tmp/cron.tmp
+
+  echo "✅ Auto Backup diaktifkan"
+  echo "⏰ Setiap hari jam 03:00 pagi"
+  sleep 2
+}
+
+disable_autobackup() {
+  crontab -l 2>/dev/null | grep -v zivpn-menu | crontab -
+  echo "❌ Auto Backup dimatikan"
+  sleep 2
+}
+
+set_autobackup_time() {
+  read -rp "Masukkan JAM (0-23): " HOUR
+
+  if ! [[ "$HOUR" =~ ^[0-9]+$ ]] || [ "$HOUR" -gt 23 ]; then
+    echo "❌ Jam tidak valid"
+    sleep 2
+    return
+  fi
+
+  crontab -l 2>/dev/null | grep -v zivpn-menu > /tmp/cron.tmp
+  echo "0 $HOUR * * * /usr/bin/zivpn-menu --autobackup" >> /tmp/cron.tmp
+  crontab /tmp/cron.tmp
+  rm -f /tmp/cron.tmp
+
+  echo "✅ Auto Backup diset ke jam $HOUR:00"
+  sleep 2
+}
+
+
+backup_zivpn_drive() {
+  clear
+  [ -z "$BOT_TOKEN" ] && echo "Telegram bot belum diset!" && sleep 2 && return
+
+  DATE=$(date +%Y%m%d-%H%M)
+  FILE="/root/zivpn-backup-$DATE.zip"
+  REMOTE="gdrive:ZIVPN-BACKUP"
+
+# === BUAT ZIP ===
+zip -r "$FILE" \
+  /etc/zivpn/users.db \
+  /etc/zivpn/config.json \
+  /etc/zivpn/domain.conf \
+  /etc/zivpn/zivpn.crt \
+  /etc/zivpn/zivpn.key \
+  /root/.config/rclone/rclone.conf \
+  >/dev/null 2>&1
+
+
+  # === CEK RCLONE ===
+DRIVE_STATUS="☁️ Drive: dilewati (belum terhubung)"
+
+if command -v rclone >/dev/null 2>&1; then
+  if rclone listremotes 2>/dev/null | grep -q "^gdrive:"; then
+    rclone lsd "$REMOTE" >/dev/null 2>&1 || rclone mkdir "$REMOTE"
+    rclone copy "$FILE" "$REMOTE" >/dev/null 2>&1
+    DRIVE_STATUS="☁️ Drive: ZIVPN-BACKUP"
+  fi
+fi
+
+  # === UPLOAD TELEGRAM ===
+  TG_RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" \
+    -F chat_id="$CHAT_ID" \
+    -F document=@"$FILE")
+
+  OK=$(echo "$TG_RESPONSE" | jq -r '.ok')
+
+  if [[ "$OK" == "true" ]]; then
+    FILE_ID=$(echo "$TG_RESPONSE" | jq -r '.result.document.file_id')
+    FILE_PATH=$(curl -s \
+      "https://api.telegram.org/bot$BOT_TOKEN/getFile?file_id=$FILE_ID" \
+      | jq -r '.result.file_path')
+
+    MSG="✅ Backup ZIVPN selesai
+
+📁 File: $(basename "$FILE")
+$DRIVE_STATUS
+
+🆔 File ID:
+$FILE_ID
+
+📂 File Path:
+$FILE_PATH"
+  else
+    ERROR_DESC=$(echo "$TG_RESPONSE" | jq -r '.description')
+    MSG="⚠️ Backup ZIVPN selesai
+
+📁 File: $(basename "$FILE")
+$DRIVE_STATUS
+
+❌ Telegram upload gagal
+$ERROR_DESC"
+  fi
+
+  # === KIRIM NOTIF ===
+  curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+    -d chat_id="$CHAT_ID" \
+    --data-urlencode "text=$MSG" >/dev/null
+
+  rm -f "$FILE"
+
+echo "✅ Backup selesai"
+[[ "$1" != "--autobackup" ]] && read -p "Press Enter..."
+}
+
+restore_zivpn_drive() {
+  clear
+  echo "======================================"
+  echo " RESTORE ZIVPN"
+  echo "======================================"
+  echo "1) Restore dari Google Drive (nama file)"
+  echo "2) Restore dari Telegram (file path)"
+  echo "0) Back"
+  echo "======================================"
+  read -rp "Pilih: " rmode
+
+ case $rmode in
+  1)
+    # === CEK RCLONE DULU ===
+    if ! command -v rclone >/dev/null 2>&1; then
+      echo "❌ rclone tidak tersedia di VPS ini"
+      echo "Restore Google Drive tidak bisa digunakan"
+      sleep 2
+      return
+    fi
+
+    clear
+    echo "Daftar backup di Google Drive:"
+    echo "----------------------------------"
+    rclone ls gdrive:ZIVPN-BACKUP
+    echo "----------------------------------"
+    read -rp "Masukkan nama file backup: " FILE
+
+    [ -z "$FILE" ] && echo "❌ Nama file kosong!" && sleep 2 && return
+
+    rclone copy "gdrive:ZIVPN-BACKUP/$FILE" /root/
+
+    if [[ ! -f "/root/$FILE" ]]; then
+      echo "❌ Download gagal dari Google Drive!"
+      sleep 2
+      return
+    fi
+    ;;
+  2)
+    clear
+    read -rp "Masukkan File Path Telegram (contoh: documents/file_18.zip): " FILE_PATH
+
+    [ -z "$FILE_PATH" ] && echo "❌ File path kosong!" && sleep 2 && return
+
+    FILE="/root/telegram-restore.zip"
+    wget -qO "$FILE" "https://api.telegram.org/file/bot$BOT_TOKEN/$FILE_PATH"
+
+    if [[ ! -f "$FILE" ]]; then
+      echo "❌ Download dari Telegram gagal!"
+      sleep 2
+      return
+    fi
+    ;;
+  0)
+    return
+    ;;
+  *)
+    restore_zivpn_drive
+    ;;
+  esac
+
+  echo "🔄 Restore data..."
+  unzip -o "$FILE" -d / >/dev/null 2>&1
+  rm -f "$FILE"
+  systemctl restart zivpn
+
+  echo "✅ Restore selesai, ZIVPN direstart"
+  read -p "Press Enter..."
+}
+
+# ===== AUTO BACKUP MODE (CRON) =====
+if [[ "$1" == "--autobackup" ]]; then
+  backup_zivpn_drive
+  exit 0
+fi
+
+
 while true; do
 menu
 case $opt in
 1) create_account ;;
 2) list_accounts ;;
-3) # delete logic
-   list_accounts ; read -rp " Input : " INP
-   if [[ "$INP" =~ ^[0-9]+$ ]]; then
-     LINE=$(sed -n "${INP}p" "$DB") ; [ -z "$LINE" ] && continue
-     P=$(echo "$LINE" | awk -F'|' '{print $2}') ; sed -i "${INP}d" "$DB"
-   else
-     P="$INP" ; LN=$(awk -F'|' -v p="$P" '$2==p {print NR}' "$DB")
-     [ -z "$LN" ] && continue ; sed -i "${LN}d" "$DB"
-   fi
-   jq --arg pass "$P" '.auth.config -= [$pass]' "$CONFIG" > /tmp/z.json && mv /tmp/z.json "$CONFIG"
-   systemctl restart zivpn ; echo "Deleted!" ; sleep 1 ;;
-4) # renew logic
-   list_accounts ; read -rp " Nomor : " NUM ; read -rp " Hari : " DY
-   LINE=$(sed -n "${NUM}p" "$DB") ; [ -z "$LINE" ] && continue
-   IFS='|' read -r U P E L <<< "$LINE" ; BASE=$(echo "$E" | cut -d' ' -f1)
-   NEW=$(date -d "$BASE +$DY days +1 day" +"%Y-%m-%d 00:00")
-   sed -i "${NUM}c\\$U|$P|$NEW|$L" "$DB" ; systemctl restart zivpn ; echo "Renewed!" ; sleep 1 ;;
-5) systemctl restart zivpn ; echo "Restarted!" ; sleep 1 ;;
-6) # delete expired
-   NOW=$(date +"%Y-%m-%d %H:%M") ; TMP="/tmp/z-clean.db" ; > "$TMP"
-   while IFS='|' read -r U P E L; do
-     if [[ "$E" < "$NOW" ]]; then jq --arg pass "$P" '.auth.config -= [$pass]' "$CONFIG" > /tmp/z.json && mv /tmp/z.json "$CONFIG"
-     else echo "$U|$P|$E|$L" >> "$TMP" ; fi
-   done < "$DB" ; mv "$TMP" "$DB" ; systemctl restart zivpn ; echo "Cleaned!" ; sleep 1 ;;
+3) delete_account ;;
+4) renew_account ;;
+5) restart_zivpn ;;
+6) delete_all_expired ;;
 7) ip_monitor ;;
-8) # change domain
-   read -rp " New Domain : " ND ; [ -z "$ND" ] && continue ; echo "$ND" > "$DOMAIN_FILE"
-   openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 -subj "/CN=$ND" -keyout /etc/zivpn/zivpn.key -out /etc/zivpn/zivpn.crt 2>/dev/null
-   systemctl restart zivpn ; DOMAIN="$ND" ; echo "Updated!" ; sleep 1 ;;
-9) # update menu
-   exec /usr/bin/zivpn-menu ;;
-10) # trial
-    MIN=30 ; U="trial$(tr -dc 0-9 </dev/urandom | head -c 4)" ; P=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 12)
-    EXP=$(date -d "+$MIN minutes" +"%Y-%m-%d %H:%M") ; L=1
-    jq --arg pass "$P" '.auth.config += [$pass]' "$CONFIG" > /tmp/z.json && mv /tmp/z.json "$CONFIG"
-    echo "$U|$P|$EXP|$L" >> "$DB" ; systemctl restart zivpn ; echo "Trial Created!" ; sleep 1 ;;
-11) # telegram bot setup
-    read -rp " Token : " BT ; read -rp " ID : " CI
-    echo -e "BOT_TOKEN=\"$BT\"\nCHAT_ID=\"$CI\"" > "$TG_FILE" ; chmod 600 "$TG_FILE" ; source "$TG_FILE" ; echo "Saved!" ; sleep 1 ;;
-12) # backup sent to telegram
-    DATE=$(date +%Y%m%d-%H%M) ; FILE="/root/backup-$DATE.zip" ; zip -r "$FILE" /etc/zivpn/ >/dev/null 2>&1
-    curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendDocument" -F chat_id="$CHAT_ID" -F document=@"$FILE" >/dev/null ; rm -f "$FILE" ; echo "Sent!" ; sleep 1 ;;
+8) change_domain ;;
+9)
+echo "Updating ZIVPN Menu..."
+TMP_FILE="/tmp/zivpn-menu-$(date +%s).sh"
+
+curl -fsSL \
+  -H "Cache-Control: no-cache" \
+  -H "Pragma: no-cache" \
+  "https://raw.githubusercontent.com/Deriandri/zuvpn/main/zivpn-menu.sh?nocache=$(date +%s)" \
+  -o "$TMP_FILE"
+
+if [ ! -s "$TMP_FILE" ]; then
+  echo "❌ Update gagal! File kosong."
+  sleep 2
+  break
+fi
+
+chmod +x "$TMP_FILE"
+mv "$TMP_FILE" /usr/bin/zivpn-menu
+
+echo "✅ Menu berhasil di-update ke versi terbaru"
+sleep 1
+exec /usr/bin/zivpn-menu
+;;
+10) create_trial ;;
+11) telegram_setting ;;
+12) backup_restore_drive ;;
 13) manage_autokill ;;
 0) exit ;;
 esac
