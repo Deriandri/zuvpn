@@ -10,9 +10,9 @@ if [[ "$1" == "--autokill" ]]; then
     LOG_FILE="/var/log/zivpn-kill.log"
     while true; do
         if [ -f "$ZIVPN_DB" ]; then
-            # Ambil trafik IP yang sedang aktif kirim paket
-            ACTIVE_IPS=$(ss -u -an | grep ":$PORT" | awk '{print $6}' | cut -d: -f1 | grep -vE "0.0.0.0|[*]" | sort -u)
-            # Ambil log login terbaru
+            # Ambil trafik IP yang AKTIF di jaringan
+            ACTIVE_IPS=$(ss -u -an | grep ":$PORT" | awk '{print $6}' | cut -d: -f1 | sort -u)
+            # Pantau log login terbaru
             LOG_NOW=$(journalctl -u zivpn --since "1 minute ago" --no-pager)
 
             while IFS='|' read -r U P E L; do
@@ -59,7 +59,7 @@ if [ -f "$TG_FILE" ]; then
   source "$TG_FILE"
 fi
 
-# PENTING: Export variabel agar dibaca PHP Website
+# Export agar terbaca oleh PHP Website
 export BOT_TOKEN="$BOT_TOKEN"
 export CHAT_ID="$CHAT_ID"
 
@@ -104,11 +104,11 @@ manage_autokill() {
     echo -e "${CYAN}══════════════════════════════════════${NC}"
     echo -e "${WHITE}       MANAGE ZIVPN AUTO KILL ${NC}"
     echo -e "${CYAN}══════════════════════════════════════${NC}"
-    echo -e " Status Satpam: $([[ "$KILL_STATUS" == "active" ]] && echo -e "${GREEN}AKTIF (Jalan)${NC}" || echo -e "${RED}MATI (Pajangan)${NC}")"
+    echo -e " Status: $([[ "$KILL_STATUS" == "active" ]] && echo -e "${GREEN}Running (Aktif)${NC}" || echo -e "${RED}Stopped (Mati)${NC}")"
     echo -e "${CYAN}══════════════════════════════════════${NC}"
-    echo -e "${YELLOW} 1${NC}) Aktifkan Auto Kill"
-    echo -e "${YELLOW} 2${NC}) Matikan Auto Kill"
-    echo -e "${YELLOW} 3${NC}) Lihat Log Penendangan"
+    echo -e "${YELLOW} 1${NC}) Enable Auto Kill"
+    echo -e "${YELLOW} 2${NC}) Disable Auto Kill"
+    echo -e "${YELLOW} 3${NC}) View Penendangan Logs"
     echo -e "${RED} 0${NC}) Back"
     read -rp " Select : " akopt
     case $akopt in
@@ -124,9 +124,9 @@ Restart=always
 WantedBy=multi-user.target
 EOF
             systemctl daemon-reload && systemctl enable zivpn-kill && systemctl start zivpn-kill
-            echo -e "${GREEN}Auto Kill Aktif!${NC}" ; sleep 1 ;;
-        2) systemctl stop zivpn-kill ; systemctl disable zivpn-kill ; echo -e "${RED}Auto Kill Mati!${NC}" ; sleep 1 ;;
-        3) clear ; echo "--- HISTORY PENENDANGAN ---" ; tail -n 25 /var/log/zivpn-kill.log 2>/dev/null || echo "Belum ada log." ; read -p "Press Enter..." ;;
+            echo -e "${GREEN}Berhasil Aktif!${NC}" ; sleep 1 ;;
+        2) systemctl stop zivpn-kill ; systemctl disable zivpn-kill ; echo -e "${RED}Dimatikan!${NC}" ; sleep 1 ;;
+        3) clear ; echo "--- HISTORY PENENDANGAN ---" ; tail -n 25 /var/log/zivpn-kill.log 2>/dev/null || echo "Belum ada log." ; read -p "Enter..." ;;
     esac
 }
 
@@ -137,7 +137,7 @@ menu() {
 
   clear
   echo -e "${CYAN}══════════════════════════════════════${NC}"
-  echo -e "${WHITE}        Z I V P N   COPYRIGHT ${NC}"
+  echo -e "${WHITE}        Z I V P N   SWEATER PINK ${NC}"
   echo -e "${CYAN}══════════════════════════════════════${NC}"
   echo -e "${GREEN} OS      ${NC}: $OS"
   echo -e "${GREEN} Domain  ${NC}: ${YELLOW}$DOMAIN${NC}"
@@ -228,12 +228,8 @@ send_telegram "<b>📢 PEMBELIAN BERHASIL</b>
 
 clear
 echo -e "${GREEN}ACCOUNT CREATED${NC}"
-echo " Domain        : $DOMAIN"
 echo " Username      : $USER"
 echo " Password      : $PASS"
-echo " Expired       : $EXP"
-echo " Aktif Selama  : $DAYS Hari"
-echo " IP Limit      : $LIMIT"
 read -p "Press Enter..."
 }
 
@@ -252,7 +248,7 @@ echo "$USER|$PASS|$EXP|$LIMIT" >> "$DB"
 systemctl restart zivpn
 
 # ===== TELEGRAM NOTIFICATION (FIXED HTML) =====
-send_telegram "<b>⏱ ZIVPN TRIAL ACCOUNT</b>
+send_telegram "⏱ <b>ZIVPN TRIAL ACCOUNT</b>
 ────────────────────
 🌐 Domain   : $DOMAIN
 👤 Username : $USER
@@ -260,15 +256,12 @@ send_telegram "<b>⏱ ZIVPN TRIAL ACCOUNT</b>
 ⏳ Expired  : $EXP
 📱 IP Limit : 1
 ────────────────────
-⚡ Type     : TRIAL (${MIN} Minutes)"
+⚡ Type     : TRIAL"
 
 clear
 echo -e "${GREEN}TRIAL CREATED${NC}"
-echo " Domain   : $DOMAIN"
 echo " Username : $USER"
 echo " Password : $PASS"
-echo " Expired  : $EXP"
-echo " Limit IP : 1"
 read -p "Press Enter..."
 }
 
@@ -288,17 +281,17 @@ echo -e "${GREEN}Domain updated successfully${NC}"
 sleep 2
 }
 
-# --- REAL IP MONITOR (STYLE SSH) ---
+# --- MONITOR REAL (HANYA MENAMPILKAN YANG LOGIN) ---
 ip_monitor() {
     clear
     echo -e "${YELLOW}──────────────────────────────────────${NC}"
     echo -e "          ${WHITE}USER LOGIN ZIVPN (REAL)${NC}"
     echo -e "${YELLOW}──────────────────────────────────────${NC}"
-    printf "  ${CYAN}%-10s %-10s %-15s${NC}\n" "LOGIN IP" "LIMIT IP" "USERNAME"
+    printf "    ${CYAN}%-10s %-10s %-15s${NC}\n" "LOGIN IP" "LIMIT IP" "USERNAME"
     
-    # 1. Ambil trafik IP yang AKTIF di jalur UDP 5667
-    local LIVE_STACK=$(ss -u -an | grep ":5667" | awk '{print $6}' | cut -d: -f1 | sort -u)
-    # 2. Ambil log login ZIVPN 12 jam terakhir
+    # Ambil trafik IP yang AKTIF di port 5667
+    local LIVE_IPS=$(ss -u -an | grep ":5667" | awk '{print $6}' | cut -d: -f1 | sort -u)
+    # Baca log autentikasi terbaru
     local LOG_AUTH=$(journalctl -u zivpn --since "12 hours ago" --no-pager | grep "authenticated")
     
     local total_online=0
@@ -306,29 +299,19 @@ ip_monitor() {
         while IFS='|' read -r U P E L; do
             [ -z "$L" ] && L="∞"
             
-            # Cari IP login terakhir user ini
+            # Cari IP terakhir yang login atas nama user ini
             local LAST_IP=$(echo "$LOG_AUTH" | grep -w "$U" | tail -n 1 | awk '{print $NF}' | cut -d: -f1)
             
-            local LOGIN_COUNT="0 IP"
-            if [[ -n "$LAST_IP" ]]; then
-                # Jika IP terakhir user tsb terdeteksi AKTIF di stack, dia ONLINE
-                if echo "$LIVE_STACK" | grep -q "$LAST_IP"; then
-                    LOGIN_COUNT="1 IP"
-                    let total_online++
-                    COLOR_DATA="\033[1;32m" # Hijau jika Online
-                else
-                    COLOR_DATA="\033[0;37m" # Putih jika Offline
-                fi
-            else
-                COLOR_DATA="\033[0;37m"
+            # Jika IP ada di Log DAN ada di Jalur Jaringan, Tampilkan
+            if [[ -n "$LAST_IP" ]] && echo "$LIVE_IPS" | grep -q "$LAST_IP"; then
+                let total_online++
+                printf "      \033[1;32m1 IP\033[0m       \033[1;32m%s IP\033[0m       \033[1;32m%s\033[0m\n" "$L" "$U"
             fi
-            
-            printf "   ${COLOR_DATA}%-10s %-10s %-15s${NC}\n" "$LOGIN_COUNT" "$L IP" "$U"
         done < "$DB"
     fi
 
     echo -e "${YELLOW}──────────────────────────────────────${NC}"
-    echo -e "          ${WHITE}$total_online User Online Sekarang${NC}"
+    echo -e "          ${YELLOW}$total_online User Online Sekarang${NC}"
     echo -e "${YELLOW}──────────────────────────────────────${NC}"
     read -p "Press Enter..."
 }
@@ -444,16 +427,14 @@ sleep 2
 }
 
 send_telegram() {
-[ -f "$TG_FILE" ] && source "$TG_FILE"
 [ -z "$BOT_TOKEN" ] && return
 [ -z "$CHAT_ID" ] && return
 
 TEXT="$1"
-# FIX: Selalu gunakan mode HTML karena Markdown gagal jika ada karakter underscore (_)
 curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
   -d chat_id="$CHAT_ID" \
   --data-urlencode "text=$TEXT" \
-  --data-urlencode "parse_mode=html" >/dev/null 2>&1 
+  --data-urlencode "parse_mode=html" >/dev/null 2>&1 &
 }
 
 backup_restore_drive() {
